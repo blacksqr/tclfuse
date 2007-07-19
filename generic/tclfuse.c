@@ -44,6 +44,7 @@ static Tcl_Obj * realPath(const char *path)
     tclfuse *tfPtr = (tclfuse *) c->private_data;
     
     objPtr = Tcl_NewStringObj(tfPtr->base, -1);
+    Tcl_IncrRefCount(objPtr);
     Tcl_AppendStringsToObj(objPtr, path, NULL);
     Tcl_FSConvertToPathType(NULL, objPtr);
     
@@ -57,6 +58,8 @@ static int hello_access(const char *path, int mask)
 
     pathPtr = realPath(path);
     res = Tcl_FSAccess(pathPtr, mask);
+    Tcl_DecrRefCount(pathPtr);
+
     return res;
 }
 
@@ -68,6 +71,8 @@ static int hello_getattr(const char *path, struct stat *stbuf)
     pathPtr = realPath(path);
     memset(stbuf, 0, sizeof(struct stat));
     res = Tcl_FSStat(pathPtr, (Tcl_StatBuf *) stbuf);
+    Tcl_DecrRefCount(pathPtr);
+
     return res;
 }
 
@@ -156,7 +161,12 @@ static int hello_open(const char *path, struct fuse_file_info *fi)
     }
     
     fprintf(stderr, "path: %s mode: %s\n", Tcl_GetString(pathPtr), Tcl_GetString(listPtr));
+
     chan = Tcl_FSOpenFileChannel(NULL, pathPtr, Tcl_GetString(listPtr), 0644);
+    Tcl_SetChannelOption(NULL, chan, "-encoding", "binary");
+    Tcl_SetChannelOption(NULL, chan, "-translation", "binary");
+    Tcl_DecrRefCount(pathPtr);
+
     if (chan == NULL) {
         err = Tcl_GetErrno();
         fprintf(stderr, "ERROR(%d): %s\n", err, Tcl_ErrnoMsg(err));
@@ -166,7 +176,27 @@ static int hello_open(const char *path, struct fuse_file_info *fi)
     hPtr = Tcl_CreateHashEntry(&tfPtr->files, (ClientData) fd, &new);
     Tcl_SetHashValue(hPtr, (ClientData) chan);
     fi->fh =  (uintptr_t)fd;
+
     return 0;
+}
+
+static int hello_release(const char *path, struct fuse_file_info *fi)
+{
+    struct fuse_context *c = fuse_get_context();
+    tclfuse *tfPtr = (tclfuse *) c->private_data;
+    Tcl_Channel chan;
+    Tcl_HashEntry *hPtr;
+
+    hPtr = Tcl_FindHashEntry(&tfPtr->files, (ClientData) fi->fh);
+    if (hPtr == NULL) {
+        fprintf(stderr, "no such file\n");
+        return -1;
+    }
+    chan = Tcl_GetHashValue(hPtr);
+    Tcl_Close(NULL, chan);
+    Tcl_DeleteHashEntry(hPtr);
+    
+    return 1;
 }
 
 static int hello_read(const char *path, char *buf, size_t size, off_t offset,
@@ -178,7 +208,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
     struct fuse_context *c = fuse_get_context();
     tclfuse *tfPtr = (tclfuse *) c->private_data;
 
-    fprintf(stderr, "hello_READ: %s\n", path);
+    fprintf(stderr, "hello_READ: %s %d\n", path, offset);
 
     hPtr = Tcl_FindHashEntry(&tfPtr->files, (ClientData) fi->fh);
     if (hPtr == NULL) {
@@ -189,14 +219,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
     Tcl_Seek(chan, offset, SEEK_SET);
     len = Tcl_Read(chan, buf, size);
 
-    if (offset < len) {
-        if (offset + size > len) {
-            size = len - offset;
-        }
-    } else {
-        size = 0;
-    }
-    return size;
+    return len;
 }
 
 int
@@ -220,10 +243,10 @@ Tclfuse_Init(Tcl_Interp *interp)
 static struct fuse_operations hello_oper = {
     .getattr	= hello_getattr,
     .readdir	= hello_readdir,
-    .open	= hello_open,
-    .read	= hello_read,
-    .access	= hello_access,
-
+    .open	    = hello_open,
+    .release	= hello_release,
+    .read	    = hello_read,
+    .access	    = hello_access,
 };
 
 static int
