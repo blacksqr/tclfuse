@@ -1,0 +1,16 @@
+.TH fuse n 0.1 "Tcl-Extensions"
+.HS fuse tcl
+.BS
+.SH NAME
+fuse \- tcl interface to fuse user filesystem
+.SH SYNOPSIS
+\fBfuse::main\fI base mountpoint options\fR
+.br
+.SH DESCRIPTION
+FUSE (Filesystem in Userspace) is a virtual filesystem API strikingly
+similar to the TCL vfs API. The big difference is that the TCL vfs exposes
+the filesystem to TCL and FUSE exposes the filesystem to the OS. Tclfuse
+provides a mechanism to bind a TCL filesystem to a FUSE mount.
+.PP
+Does not return.
+.PP
